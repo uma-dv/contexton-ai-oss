@@ -92,7 +92,7 @@ class TestConfidenceEngine:
         """Test high confidence calculation."""
         engine = ConfidenceEngine()
         node = {
-            "mentions": 10,
+            "confidence": 1.0,
             "last_verified": "2026-08-16T00:00:00Z",
             "failure_count": 0
         }
@@ -103,7 +103,7 @@ class TestConfidenceEngine:
         """Test low confidence with failures."""
         engine = ConfidenceEngine()
         node = {
-            "mentions": 2,
+            "confidence": 1.0,
             "last_verified": "2026-08-16T00:00:00Z",
             "failure_count": 3
         }
@@ -114,12 +114,12 @@ class TestConfidenceEngine:
         """Test confidence breakdown."""
         engine = ConfidenceEngine()
         node = {
-            "mentions": 5,
+            "confidence": 0.8,
             "last_verified": "2026-08-16T00:00:00Z",
             "failure_count": 1
         }
         breakdown = engine.get_confidence_breakdown(node)
-        assert "base_score" in breakdown
+        assert "stored_confidence" in breakdown
         assert "decay_factor" in breakdown
         assert "failure_penalty" in breakdown
         assert "final_confidence" in breakdown

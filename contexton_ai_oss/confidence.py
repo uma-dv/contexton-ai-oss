@@ -55,10 +55,7 @@ class ConfidenceEngine:
         all use this value.
         
         Formula:
-        1. Base: max(stored_confidence, min(1.0, mentions / 5))
-           - Stored confidence is the trust level set at ingestion time
-           - More mentions (verifications) can raise the base up to 1.0
-           - The stronger of the two wins
+        1. Base: stored confidence (set at ingestion, modified by success/failure)
         
         2. Decay: * (DECAY_RATE ^ days_since_verified)
            - Old knowledge loses confidence over time
@@ -76,12 +73,10 @@ class ConfidenceEngine:
         Returns:
             Confidence score between MIN_CONFIDENCE and 1.0
         """
-        # Base confidence: stored ingestion trust, raised by verification
+        # Base confidence: stored ingestion trust (modified by record_success)
         stored = node.get("confidence")
         if stored is None:
             stored = 0.5  # Unknown nodes start neutral
-        mentions = node.get("mentions", 1)
-        base = min(1.0, max(float(stored), mentions / 5.0))
         
         # Time decay
         last_verified = node.get("last_verified")
@@ -100,7 +95,7 @@ class ConfidenceEngine:
         failure_penalty = self.FAILURE_PENALTY ** failure_count
         
         # Combined confidence
-        confidence = base * decay * failure_penalty
+        confidence = float(stored) * decay * failure_penalty
         
         return max(self.MIN_CONFIDENCE, min(1.0, confidence))
     
@@ -189,11 +184,9 @@ class ConfidenceEngine:
         Returns:
             Dict with confidence components
         """
-        mentions = node.get("mentions", 1)
         stored = node.get("confidence")
         if stored is None:
             stored = 0.5
-        base = min(1.0, max(float(stored), mentions / 5.0))
         
         last_verified = node.get("last_verified")
         if last_verified:
@@ -215,8 +208,6 @@ class ConfidenceEngine:
         
         return {
             "stored_confidence": round(float(stored), 3),
-            "mentions": mentions,
-            "base_score": round(base, 3),
             "days_since_verified": days_old,
             "decay_factor": round(decay, 3),
             "failure_count": failure_count,

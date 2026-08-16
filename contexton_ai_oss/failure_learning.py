@@ -195,8 +195,6 @@ class FailureLearningEngine:
             if node:
                 node["mentions"] = node.get("mentions", 0) + 1
                 node["last_verified"] = now
-                if node.get("failure_count", 0) > 0:
-                    node["failure_count"] = max(0, node["failure_count"] - 1)
                 affected_nodes.add(node_id)
         
         # Mark edges that CONNECT successful nodes
@@ -213,19 +211,15 @@ class FailureLearningEngine:
         for node_id in affected_nodes:
             node = self.graph.nodes.get(node_id)
             if node:
-                node["mentions"] = node.get("mentions", 0) + 1
+                node["success_count"] = node.get("success_count", 0) + 1
                 node["last_verified"] = now
-                if node.get("failure_count", 0) > 0:
-                    node["failure_count"] = max(0, node["failure_count"] - 1)
-                    node["confidence"] = min(
-                        1.0,
-                        node["confidence"] / self.FAILURE_CONFIDENCE_MULTIPLIER
-                    )
-                else:
-                    node["confidence"] = min(
-                        1.0,
-                        node["confidence"] * self.SUCCESS_CONFIDENCE_MULTIPLIER
-                    )
+                # Undo failure damage: decrement failure_count (min 0)
+                fc = node.get("failure_count", 0)
+                if fc > 0:
+                    node["failure_count"] = fc - 1
+                # Bounded additive restoration: cap at original_confidence, not 1.0
+                ceiling = node.get("original_confidence", node["confidence"])
+                node["confidence"] = min(ceiling, node["confidence"] + 0.3)
         
         # Save changes
         self.graph._dirty = True
@@ -274,10 +268,9 @@ class FailureLearningEngine:
             if not node_tokens:
                 continue
             shared = len(answer_tokens & node_tokens)
-            # Require 3+ shared tokens to avoid collateral damage
-            if shared >= 3:
-                related.add(nid)
-            elif token_overlap(answer, content) >= 0.4:
+            # Require BOTH 3+ shared tokens AND >= 0.4 Jaccard overlap
+            # This ensures only facts with substantial content overlap are penalized
+            if shared >= 3 and token_overlap(answer, content) >= 0.4:
                 related.add(nid)
         
         return related

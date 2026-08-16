@@ -216,12 +216,14 @@ class ContextGraph:
                 "content_lower": normalize(content[:2000]),
                 "source": source,
                 "confidence": confidence,
+                "original_confidence": confidence,  # Ceiling for bounded recovery
                 "tag": tag,
                 "mentions": 1,
                 "created_at": now,
                 "last_seen": now,
                 "last_verified": now,
                 "failure_count": 0,
+                "success_count": 0,
                 "query_count": 0,
             }
             if metadata:
