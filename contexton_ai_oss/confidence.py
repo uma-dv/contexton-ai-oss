@@ -31,11 +31,11 @@ class ConfidenceEngine:
         engine = ConfidenceEngine()
         
         # Node with high confidence
-        node1 = {"mentions": 10, "last_verified": now(), "failure_count": 0}
+        node1 = {"confidence": 1.0, "last_verified": now(), "failure_count": 0}
         print(engine.node_confidence(node1))  # 1.0
         
         # Node with low confidence (old, failed)
-        node2 = {"mentions": 2, "last_verified": 30_days_ago, "failure_count": 3}
+        node2 = {"confidence": 0.8, "last_verified": 30_days_ago, "failure_count": 3}
         print(engine.node_confidence(node2))  # 0.05 (floored)
     """
     
