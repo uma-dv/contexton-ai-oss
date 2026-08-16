@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "contexton-ai-oss"
-version = "0.1.0"
+version = "0.2.0"
 description = "Knowledge Graphs with Confidence Scoring and Failure Learning"
 readme = "README.md"
 license = "Apache-2.0"

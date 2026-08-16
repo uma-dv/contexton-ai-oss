@@ -107,6 +107,9 @@ class ContextGraph:
         # Tool registry: tool name -> node id
         self.tools: Dict[str, str] = {}
         
+        # Performance: dirty flag for batch saving
+        self._dirty = False
+        
         # Load existing data if available
         if data_dir:
             self._load()
@@ -144,8 +147,10 @@ class ContextGraph:
                     self.tools[node.get("content", "")] = nid
     
     def _save(self):
-        """Save graph to disk."""
+        """Save graph to disk (only if dirty)."""
         if not self.data_dir:
+            return
+        if not self._dirty:
             return
         
         os.makedirs(self.data_dir, exist_ok=True)
@@ -163,6 +168,13 @@ class ContextGraph:
                 "entity_aliases": self.entity_aliases,
                 "tools": self.tools,
             }, f, indent=2, ensure_ascii=False)
+        
+        self._dirty = False
+    
+    def save(self):
+        """Force save graph to disk (clears dirty flag)."""
+        self._dirty = True
+        self._save()
     
     def add_node(
         self,
@@ -215,7 +227,7 @@ class ContextGraph:
             if metadata:
                 self.nodes[nid]["metadata"] = metadata
         
-        self._save()
+        self._dirty = True
         return nid
     
     def add_edge(
@@ -245,7 +257,7 @@ class ContextGraph:
                 e["weight"] = min(1.0, e["weight"] + 0.1)
                 e["mentions"] = e.get("mentions", 1) + 1
                 e["last_seen"] = utc_iso_now()
-                self._save()
+                self._dirty = True
                 return
         
         # Create new edge
@@ -265,7 +277,7 @@ class ContextGraph:
             "created_at": now,
             "last_seen": now,
         })
-        self._save()
+        self._dirty = True
     
     def get_node(self, node_id: str) -> Optional[Dict]:
         """Get a node by ID."""
@@ -605,6 +617,7 @@ class ContextGraph:
             # Rebuild the index for the canonical name
             self.entity_index[normalize(canonical)] = keep_id
         
+        self._dirty = True
         self._save()
         return {
             "merged_nodes": merged,
@@ -791,6 +804,7 @@ class ContextGraph:
                 )
             prev_id = sid
         
+        self._dirty = True
         self._save()
         return {
             "procedure_id": pid,
@@ -852,7 +866,7 @@ class ContextGraph:
         if agent_id:
             self.nodes[nid]["agent_id"] = agent_id
         self.tools[name] = nid
-        self._save()
+        self._dirty = True
         return nid
     
     def list_tools(self) -> List[Dict[str, Any]]:
@@ -916,6 +930,7 @@ class ContextGraph:
                 node["confidence"] * self.failure_engine.FAILURE_CONFIDENCE_MULTIPLIER
             )
             node.setdefault("errors", []).append(error[:200])
+        self._dirty = True
         self._save()
         return {
             "status": "recorded",
@@ -1164,6 +1179,7 @@ class ContextGraph:
             for nid in candidates:
                 self.edges = [e for e in self.edges if e["source"] != nid and e["target"] != nid]
                 del self.nodes[nid]
+            self._dirty = True
             self._save()
         
         return {
@@ -1373,6 +1389,7 @@ class ContextGraph:
                 self.nodes[eid].setdefault("agent_id", agent_id)
             ingested_entities += 1
         
+        self._dirty = True
         self._save()
         
         return {

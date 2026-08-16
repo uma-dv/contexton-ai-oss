@@ -491,6 +491,9 @@ def ingest_from_enterprise_graph(
     ingested_nodes = 0
     ingested_edges = 0
     
+    # Map enterprise node IDs to OSS node IDs
+    enterprise_to_oss = {}
+    
     # Ingest nodes
     for nid, node in nodes.items():
         content = node.get("content", "")
@@ -512,7 +515,7 @@ def ingest_from_enterprise_graph(
         oss_type = type_mapping.get(node_type, "fact")
         
         # Add node to OSS
-        context_graph.add_node(
+        oss_id = context_graph.add_node(
             content=content,
             node_type=oss_type,
             source=node.get("source", "enterprise_import"),
@@ -520,18 +523,33 @@ def ingest_from_enterprise_graph(
             tag="extracted",
             metadata={"enterprise_id": nid, "imported": True}
         )
+        enterprise_to_oss[nid] = oss_id
         ingested_nodes += 1
     
-    # Ingest edges (we need to map enterprise node IDs to OSS node IDs)
-    # This is a simplified version - in production, you'd need proper ID mapping
+    # Ingest edges - actually create them in the graph
     for edge in edges:
-        # For now, just count edges
-        ingested_edges += 1
+        src_enterprise = edge.get("source", "")
+        tgt_enterprise = edge.get("target", "")
+        
+        # Map to OSS node IDs
+        src_oss = enterprise_to_oss.get(src_enterprise)
+        tgt_oss = enterprise_to_oss.get(tgt_enterprise)
+        
+        if src_oss and tgt_oss:
+            context_graph.add_edge(
+                source_id=src_oss,
+                target_id=tgt_oss,
+                edge_type=edge.get("type", "related_to"),
+                weight=edge.get("weight", 0.8),
+                tag="extracted",
+                rationale=f"imported from enterprise edge"
+            )
+            ingested_edges += 1
     
     context_graph._save()
     
     return {
         "nodes_ingested": ingested_nodes,
         "edges_ingested": ingested_edges,
-        "message": f"Ingested {ingested_nodes} nodes from enterprise graph",
+        "message": f"Ingested {ingested_nodes} nodes and {ingested_edges} edges from enterprise graph",
     }

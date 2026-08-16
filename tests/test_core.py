@@ -178,13 +178,16 @@ class TestFailureLearning:
         graph = ContextGraph()
         graph.ingest("What is PM-JAY?", "PM-JAY is health insurance for poor families")
         
-        before = graph.query("PM-JAY")[0]["confidence"]
-        graph.record_failure("What is PM-JAY?", "PM-JAY is a housing scheme", "Wrong")
-        after_failure = graph.query("PM-JAY")[0]["confidence"]
+        # Query for the specific fact, not the entity
+        before = graph.query("PM-JAY", node_type="fact")[0]["confidence"]
+        # Use a wrong answer that shares tokens with the correct fact
+        # so the failure actually affects the knowledge
+        graph.record_failure("What is PM-JAY?", "PM-JAY is housing insurance for poor families", "Wrong domain")
+        after_failure = graph.query("PM-JAY", node_type="fact")[0]["confidence"]
         assert after_failure < before
         
-        graph.record_success("What is PM-JAY?", "PM-JAY is health insurance")
-        after_success = graph.query("PM-JAY")[0]["confidence"]
+        graph.record_success("What is PM-JAY?", "PM-JAY is health insurance for poor families")
+        after_success = graph.query("PM-JAY", node_type="fact")[0]["confidence"]
         assert after_success > after_failure
 
 

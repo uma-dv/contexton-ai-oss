@@ -8,7 +8,7 @@ Open-source version by ODEFTO AI Labs.
 Enterprise version: https://contexton.ai
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .graph import ContextGraph
 from .confidence import ConfidenceEngine

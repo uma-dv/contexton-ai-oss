@@ -142,6 +142,10 @@ def is_alias(candidate: str, existing: str) -> bool:
     2. One is the initialism of the other (PM-JAY vs Pradhan Mantri Jan Arogya Yojana)
     3. An all-caps acronym token of one appears inside the other
        (e.g. "NHA" inside "National Health Authority (NHA)")
+    
+    SAFETY: Requires minimum 2 chars. For initialism-only matches (no shared
+    tokens), we require the longer name to have at least 3 words to prevent
+    false positives like "New Home Appliances" matching "NHA".
     """
     a = normalize(candidate)
     b = normalize(existing)
@@ -151,17 +155,50 @@ def is_alias(candidate: str, existing: str) -> bool:
     if a == b:
         return True
 
+    # SAFETY: Both must be at least 2 chars
+    if len(a) < 2 or len(b) < 2:
+        return False
+
+    # SAFETY: For short names (< 4 chars), require exact match or shared tokens
+    a_tokens = set(a.split()) - STOPWORDS
+    b_tokens = set(b.split()) - STOPWORDS
+    shared_meaningful = a_tokens & b_tokens
+    
     # Initialism match in either direction (space-insensitive)
-    if initials(candidate) == _compact(existing) or initials(existing) == _compact(candidate):
-        return True
+    a_initials = initials(candidate)
+    b_initials = initials(existing)
+    
+    # Check if the acronym appears as an all-caps token in the original text
+    a_has_acronym = bool(re.search(r'\b[A-Z]{2,}\b', candidate))
+    b_has_acronym = bool(re.search(r'\b[A-Z]{2,}\b', existing))
+    
+    # Match if: initials match AND at least one side has the acronym in text
+    # For safety, if there are no shared meaningful tokens, require the longer
+    # name to have at least 3 words (prevents "New Home Appliances" matching "NHA")
+    if a_initials == _compact(existing) and (a_has_acronym or b_has_acronym):
+        if shared_meaningful:
+            return True
+        # Allow if the longer name has at least 3 words
+        if max(len(a_tokens), len(b_tokens)) >= 3:
+            return True
+    if b_initials == _compact(candidate) and (a_has_acronym or b_has_acronym):
+        if shared_meaningful:
+            return True
+        # Allow if the longer name has at least 3 words
+        if max(len(a_tokens), len(b_tokens)) >= 3:
+            return True
 
     # Acronym token containment in either direction
-    b_tokens = set(b.split())
-    a_tokens = set(a.split())
-    if any(t in b_tokens for t in _acronym_tokens(candidate)):
-        return True
-    if any(t in a_tokens for t in _acronym_tokens(existing)):
-        return True
+    # Only match if the acronym is explicitly in the text (e.g. "NHA" in "National Health Authority (NHA)")
+    a_acronym_tokens = _acronym_tokens(candidate)
+    b_acronym_tokens = _acronym_tokens(existing)
+    
+    if a_acronym_tokens and any(t in b_tokens for t in a_acronym_tokens):
+        if shared_meaningful:
+            return True
+    if b_acronym_tokens and any(t in a_tokens for t in b_acronym_tokens):
+        if shared_meaningful:
+            return True
 
     return False
 

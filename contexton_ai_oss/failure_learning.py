@@ -97,36 +97,38 @@ class FailureLearningEngine:
         """
         now = utc_iso_now()
         
-        # Find nodes related to the failed query/answer using token overlap
+        # Find nodes related to the failed answer using token overlap
+        # Match on ANSWER, not query — this is the wrong content
         related = self._find_related_nodes(query, answer)
         
-        # Mark related edges as failed
+        # Only affect nodes that DIRECTLY match the answer
+        # Do NOT cascade penalties through edges to connected nodes
         affected_edges = []
         affected_nodes = set()
         
+        # Mark directly related nodes as failed
+        for node_id in related:
+            node = self.graph.nodes.get(node_id)
+            if node:
+                node["failure_count"] = node.get("failure_count", 0) + 1
+                affected_nodes.add(node_id)
+        
+        # Mark edges that CONNECT failed nodes to other nodes
+        # Only penalize edges where BOTH source and target are in the failed set
         for edge in self.graph.edges:
-            if edge["source"] in related or edge["target"] in related:
-                # Mark as failed
+            if edge["source"] in related and edge["target"] in related:
                 edge["failure_count"] = edge.get("failure_count", 0) + 1
                 edge["last_outcome"] = "failure"
-                edge["confidence"] = max(
-                    self.MIN_CONFIDENCE_AFTER_FAILURE,
-                    edge["confidence"] * self.FAILURE_CONFIDENCE_MULTIPLIER
-                )
-                
                 affected_edges.append(edge)
-                affected_nodes.add(edge["source"])
-                affected_nodes.add(edge["target"])
         
-        # Reduce confidence of affected nodes
+        # Reduce failure_count of affected nodes
+        # NOTE: We ONLY increment failure_count here. The ConfidenceEngine
+        # applies the penalty via 0.5^failure_count. We do NOT also multiply
+        # node["confidence"] directly — that would double-count the failure.
         for node_id in affected_nodes:
             node = self.graph.nodes.get(node_id)
             if node:
                 node["failure_count"] = node.get("failure_count", 0) + 1
-                node["confidence"] = max(
-                    self.MIN_CONFIDENCE_AFTER_FAILURE,
-                    node["confidence"] * self.FAILURE_CONFIDENCE_MULTIPLIER
-                )
         
         # Add observation node about the failure
         failure_content = f"FAILED: {query[:100]} → {answer[:100]}"
@@ -149,6 +151,7 @@ class FailureLearningEngine:
         )
         
         # Save changes
+        self.graph._dirty = True
         self.graph._save()
         
         return {
@@ -186,36 +189,33 @@ class FailureLearningEngine:
         """
         now = utc_iso_now()
         
-        # Find nodes related to the successful query/answer using token overlap
+        # Find nodes related to the successful answer using token overlap
+        # Match on ANSWER content, not query (same as record_failure)
         related = self._find_related_nodes(query, answer)
         
-        # Mark related edges as successful
+        # Only affect nodes that DIRECTLY match the answer
+        # Do NOT cascade bonuses through edges to connected nodes
         affected_edges = []
         affected_nodes = set()
         
+        # Mark directly related nodes as successful
+        for node_id in related:
+            node = self.graph.nodes.get(node_id)
+            if node:
+                node["mentions"] = node.get("mentions", 0) + 1
+                node["last_verified"] = now
+                if node.get("failure_count", 0) > 0:
+                    node["failure_count"] = max(0, node["failure_count"] - 1)
+                affected_nodes.add(node_id)
+        
+        # Mark edges that CONNECT successful nodes
+        # Only boost edges where BOTH source and target are in the successful set
         for edge in self.graph.edges:
-            if edge["source"] in related or edge["target"] in related:
-                # Mark as successful
+            if edge["source"] in related and edge["target"] in related:
                 edge["success_count"] = edge.get("success_count", 0) + 1
                 edge["last_outcome"] = "success"
                 edge["verified"] = True
-                
-                # Undo failure damage if the edge had failed before
-                if edge.get("failure_count", 0) > 0:
-                    edge["failure_count"] = max(0, edge["failure_count"] - 1)
-                    edge["confidence"] = min(
-                        1.0,
-                        edge["confidence"] / self.FAILURE_CONFIDENCE_MULTIPLIER
-                    )
-                else:
-                    edge["confidence"] = min(
-                        1.0,
-                        edge["confidence"] * self.SUCCESS_CONFIDENCE_MULTIPLIER
-                    )
-                
                 affected_edges.append(edge)
-                affected_nodes.add(edge["source"])
-                affected_nodes.add(edge["target"])
         
         # Increase confidence of affected nodes - a verified success undoes
         # the damage of a prior failure, so confidence is actually restored
@@ -237,6 +237,7 @@ class FailureLearningEngine:
                     )
         
         # Save changes
+        self.graph._dirty = True
         self.graph._save()
         
         return {
@@ -248,16 +249,24 @@ class FailureLearningEngine:
     
     def _find_related_nodes(self, query: str, answer: str) -> Set[str]:
         """
-        Find graph nodes related to a query/answer pair using meaningful
+        Find graph nodes related to a FAILED answer using meaningful
         token overlap (punctuation-insensitive, stopword-filtered).
         
-        A node is related when it shares at least 2 meaningful tokens
-        with the combined query+answer text, or has strong Jaccard
-        overlap. Bookkeeping/observation nodes are never matched.
+        IMPORTANT: We match primarily on the ANSWER (the wrong content),
+        not the query. The query touches the entity node which connects
+        to ALL facts about that entity — matching on query would cause
+        collateral damage to correct facts.
+        
+        A node is related when it shares at least 3 meaningful tokens
+        with the failed answer, or has strong Jaccard overlap with the
+        answer. Bookkeeping/observation nodes are never matched.
+        
+        We require 3+ shared tokens (not 2) to prevent false positives
+        where unrelated facts share common words like "poor" or "families".
         """
-        combined = f"{query} {answer}"
-        combined_tokens = set(tokenize(combined))
-        if not combined_tokens:
+        # Match on ANSWER, not query — this is the wrong content
+        answer_tokens = set(tokenize(answer))
+        if not answer_tokens:
             return set()
         
         related = set()
@@ -265,14 +274,19 @@ class FailureLearningEngine:
             # Never match bookkeeping nodes (e.g. prior failure observations)
             if node.get("type") == "observation":
                 continue
+            # Never match entity nodes — they represent concepts, not specific facts
+            # A failure about a wrong answer should only affect the fact, not the entity
+            if node.get("type") == "entity":
+                continue
             content = node.get("content", "")
             node_tokens = set(tokenize(content))
             if not node_tokens:
                 continue
-            shared = len(combined_tokens & node_tokens)
-            if shared >= 2:
+            shared = len(answer_tokens & node_tokens)
+            # Require 3+ shared tokens to avoid collateral damage
+            if shared >= 3:
                 related.add(nid)
-            elif token_overlap(combined, content) >= 0.25:
+            elif token_overlap(answer, content) >= 0.4:
                 related.add(nid)
         
         return related
