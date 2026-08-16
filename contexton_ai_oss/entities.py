@@ -118,9 +118,24 @@ def initials(name: str) -> str:
     """
     Compute the initialism of a multi-word name, e.g.
     "Pradhan Mantri Jan Arogya Yojana" -> "pmjay".
+    Handles all-caps tokens like "NHA" -> "nha" (each letter).
     """
+    # Check for all-caps tokens in original text before tokenization
+    all_caps_tokens = set(re.findall(r'\b[A-Z]{2,}\b', name))
+    
     tokens = [t for t in tokenize(name) if t not in STOPWORDS]
-    return "".join(t[0] for t in tokens if t).lower()
+    
+    result = []
+    for t in tokens:
+        if not t:
+            continue
+        # For all-caps tokens (acronyms like "NHA"), extract each letter
+        if t.upper() in all_caps_tokens:
+            result.extend(list(t.lower()))
+        else:
+            result.append(t[0].lower())
+    
+    return "".join(result)
 
 
 def _compact(text: str) -> str:
@@ -173,20 +188,23 @@ def is_alias(candidate: str, existing: str) -> bool:
     b_has_acronym = bool(re.search(r'\b[A-Z]{2,}\b', existing))
     
     # Match if: initials match AND at least one side has the acronym in text
-    # For safety, if there are no shared meaningful tokens, require the longer
-    # name to have at least 4 words (prevents "New Home Appliances" matching "NHA")
-    if a_initials == _compact(existing) and (a_has_acronym or b_has_acronym):
-        if shared_meaningful:
-            return True
-        # Allow if the longer name has at least 4 words
-        if max(len(a_tokens), len(b_tokens)) >= 4:
-            return True
-    if b_initials == _compact(candidate) and (a_has_acronym or b_has_acronym):
-        if shared_meaningful:
-            return True
-        # Allow if the longer name has at least 4 words
-        if max(len(a_tokens), len(b_tokens)) >= 4:
-            return True
+    # SAFETY: For initialism-only matches (no shared meaningful tokens):
+    #   - If candidate is all-caps AND existing explicitly contains the acronym
+    #     (like "NHA" in "National Health Authority (NHA)"), allow it
+    #   - Otherwise, require 4+ words in the longer name to prevent false positives
+    if a_initials and b_initials and a_initials == b_initials:
+        if a_has_acronym or b_has_acronym:
+            if shared_meaningful:
+                return True
+            # If candidate is all-caps AND existing explicitly contains it
+            if a_has_acronym and a in b:
+                return True
+            # If existing has acronym AND candidate is the acronym
+            if b_has_acronym and b in a:
+                return True
+            # For other cases, require 4+ words
+            if max(len(a_tokens), len(b_tokens)) >= 4:
+                return True
 
     # Acronym token containment in either direction
     # Only match if the acronym is explicitly in the text (e.g. "NHA" in "National Health Authority (NHA)")
