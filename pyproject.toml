@@ -38,10 +38,10 @@ dev = [
 contexton-ai-oss = "contexton_ai_oss.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/ODEFTO/contexton-ai-oss"
-Documentation = "https://github.com/ODEFTO/contexton-ai-oss/tree/main/docs"
-Repository = "https://github.com/ODEFTO/contexton-ai-oss"
-Issues = "https://github.com/ODEFTO/contexton-ai-oss/issues"
+Homepage = "https://github.com/uma-dv/contexton-ai-oss"
+Documentation = "https://github.com/uma-dv/contexton-ai-oss/tree/main/docs"
+Repository = "https://github.com/uma-dv/contexton-ai-oss"
+Issues = "https://github.com/uma-dv/contexton-ai-oss/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["contexton_ai_oss"]
