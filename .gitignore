@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+web_demo.log
+demo_data/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Internal files
+Conversation*.txt
+ScopeTree*.pdf

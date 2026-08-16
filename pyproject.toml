@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "contexton-ai-oss"
+version = "0.1.0"
+description = "Knowledge Graphs with Confidence Scoring and Failure Learning"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "ODEFTO AI Labs", email = "contact@contexton.ai" }
+]
+keywords = ["knowledge-graph", "ai-agents", "memory", "confidence", "context"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=2.0"]
+vis = ["plotly>=5.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "mcp>=2.0",
+]
+
+[project.scripts]
+contexton-ai-oss = "contexton_ai_oss.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ODEFTO/contexton-ai-oss"
+Documentation = "https://github.com/ODEFTO/contexton-ai-oss/tree/main/docs"
+Repository = "https://github.com/ODEFTO/contexton-ai-oss"
+Issues = "https://github.com/ODEFTO/contexton-ai-oss/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["contexton_ai_oss"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
