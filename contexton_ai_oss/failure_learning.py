@@ -121,15 +121,6 @@ class FailureLearningEngine:
                 edge["last_outcome"] = "failure"
                 affected_edges.append(edge)
         
-        # Reduce failure_count of affected nodes
-        # NOTE: We ONLY increment failure_count here. The ConfidenceEngine
-        # applies the penalty via 0.5^failure_count. We do NOT also multiply
-        # node["confidence"] directly — that would double-count the failure.
-        for node_id in affected_nodes:
-            node = self.graph.nodes.get(node_id)
-            if node:
-                node["failure_count"] = node.get("failure_count", 0) + 1
-        
         # Add observation node about the failure
         failure_content = f"FAILED: {query[:100]} → {answer[:100]}"
         if reason:

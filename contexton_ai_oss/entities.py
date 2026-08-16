@@ -144,7 +144,7 @@ def is_alias(candidate: str, existing: str) -> bool:
        (e.g. "NHA" inside "National Health Authority (NHA)")
     
     SAFETY: Requires minimum 2 chars. For initialism-only matches (no shared
-    tokens), we require the longer name to have at least 3 words to prevent
+    tokens), we require the longer name to have at least 4 words to prevent
     false positives like "New Home Appliances" matching "NHA".
     """
     a = normalize(candidate)
@@ -174,18 +174,18 @@ def is_alias(candidate: str, existing: str) -> bool:
     
     # Match if: initials match AND at least one side has the acronym in text
     # For safety, if there are no shared meaningful tokens, require the longer
-    # name to have at least 3 words (prevents "New Home Appliances" matching "NHA")
+    # name to have at least 4 words (prevents "New Home Appliances" matching "NHA")
     if a_initials == _compact(existing) and (a_has_acronym or b_has_acronym):
         if shared_meaningful:
             return True
-        # Allow if the longer name has at least 3 words
-        if max(len(a_tokens), len(b_tokens)) >= 3:
+        # Allow if the longer name has at least 4 words
+        if max(len(a_tokens), len(b_tokens)) >= 4:
             return True
     if b_initials == _compact(candidate) and (a_has_acronym or b_has_acronym):
         if shared_meaningful:
             return True
-        # Allow if the longer name has at least 3 words
-        if max(len(a_tokens), len(b_tokens)) >= 3:
+        # Allow if the longer name has at least 4 words
+        if max(len(a_tokens), len(b_tokens)) >= 4:
             return True
 
     # Acronym token containment in either direction
