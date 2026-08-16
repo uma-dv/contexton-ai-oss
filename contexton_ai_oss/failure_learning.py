@@ -28,6 +28,11 @@ Example:
 from typing import Dict, List, Any, Optional, Set
 
 from .text_utils import tokenize, token_overlap, shared_tokens, utc_iso_now
+from .lifecycle import (
+    STATE_USED, STATE_FAILURE, STATE_SUSPECT, STATE_QUARANTINED,
+    STATE_SUCCESS, STATE_REINFORCED, STATE_TRUSTED, STATE_REVERIFIED,
+    QUARANTINE_THRESHOLD,
+)
 
 
 class FailureLearningEngine:
@@ -112,6 +117,17 @@ class FailureLearningEngine:
             if node:
                 node["failure_count"] = node.get("failure_count", 0) + 1
                 affected_nodes.add(node_id)
+                # Trust lifecycle: USED → FAILURE → SUSPECT
+                current_state = node.get("state", STATE_TRUSTED)
+                if current_state in (STATE_TRUSTED, STATE_USED, STATE_SUCCESS, STATE_REINFORCED):
+                    node["state"] = STATE_FAILURE
+                elif current_state == STATE_FAILURE:
+                    node["state"] = STATE_SUSPECT
+                # Auto-quarantine if confidence drops below threshold
+                from .confidence import ConfidenceEngine
+                eng = ConfidenceEngine()
+                if eng.node_confidence(node) < QUARANTINE_THRESHOLD:
+                    node["state"] = STATE_QUARANTINED
         
         # Mark edges that CONNECT failed nodes to other nodes
         # Only penalize edges where BOTH source and target are in the failed set
@@ -196,6 +212,14 @@ class FailureLearningEngine:
                 node["mentions"] = node.get("mentions", 0) + 1
                 node["last_verified"] = now
                 affected_nodes.add(node_id)
+                # Trust lifecycle: FAILURE/SUSPECT → REINFORCED; QUARANTINED → REVERIFIED
+                current_state = node.get("state", STATE_TRUSTED)
+                if current_state == STATE_QUARANTINED:
+                    node["state"] = STATE_REVERIFIED
+                elif current_state in (STATE_FAILURE, STATE_SUSPECT):
+                    node["state"] = STATE_REINFORCED
+                elif current_state in (STATE_TRUSTED, STATE_USED, STATE_SUCCESS):
+                    node["state"] = STATE_SUCCESS
         
         # Mark edges that CONNECT successful nodes
         # Only boost edges where BOTH source and target are in the successful set

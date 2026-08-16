@@ -357,25 +357,24 @@ INDEX_HTML = """<!DOCTYPE html>
   <div class="col">
     <div class="card" id="c-how">
       <h2>How it works</h2>
-      <p class="note">Every piece of knowledge carries a <b>confidence score 0–1</b> with a quality badge. The score comes from a simple, explainable formula:</p>
-      <pre class="out" style="max-height:none">confidence = base × decay × failure_penalty
+      <p class="note">Every piece of knowledge carries a <b>confidence score 0–1</b> with a quality badge. The score comes from a simple, explainable formula (paper Section IV):</p>
+      <pre class="out" style="max-height:none">R(f) = conf_stored × decay × failure_penalty
 
-base    = max(stored, mentions / 5)   capped at 1.0
-decay   = 0.95 ^ days_since_verified
-failure = 0.5 ^ failure_count
+conf_stored = base confidence at ingestion
+decay       = 0.95 ^ days_since_verified
+failure     = 0.5 ^ failure_count
 
 badges: 🟢 ≥ 0.8 · 🟡 0.5–0.8 · 🔴 &lt; 0.5</pre>
+      <p class="note"><b>Trust lifecycle:</b> Every node follows: NEW → TRUSTED → USED → SUCCESS/FAILURE → REINFORCED/SUSPECT → QUARANTINED → REVERIFIED. Nodes below 0.3 confidence are auto-quarantined and excluded from retrieval.</p>
       <p class="note"><b>Try it live</b> — move the sliders, the engine computes the real score:</p>
       <label>Stored confidence (trust at ingest)</label>
       <input type="range" id="cw-stored" min="0" max="100" value="80" oninput="updateCalc()"> <span id="cv-stored">0.8</span>
-      <label>Mentions (times verified)</label>
-      <input type="range" id="cw-mentions" min="1" max="10" value="1" oninput="updateCalc()"> <span id="cv-mentions">1</span>
       <label>Days since last verified (decay)</label>
       <input type="range" id="cw-days" min="0" max="90" value="0" oninput="updateCalc()"> <span id="cv-days">0</span>
       <label>Failure count (penalty)</label>
       <input type="range" id="cw-failures" min="0" max="5" value="0" oninput="updateCalc()"> <span id="cv-failures">0</span>
       <div id="cw-result" style="margin-top:10px"><div class="result">…</div></div>
-      <p class="note"><b>Failure learning loop:</b> agent gives a wrong answer → failure_count +1 and confidence halves → 🔴. Agent gives the correct answer → failure undone, confidence restored → 🟢. That feedback loop is what no other tool has.</p>
+      <p class="note"><b>Failure learning loop:</b> agent gives a wrong answer → failure_count +1 and confidence halves → 🔴. Agent gives the correct answer → failure_count −1, confidence restored → 🟢. That feedback loop is what no other tool has.</p>
     </div>
 
     <div class="card" id="c-ingest">
@@ -458,6 +457,52 @@ badges: 🟢 ≥ 0.8 · 🟡 0.5–0.8 · 🔴 &lt; 0.5</pre>
       <h2>Entity aliases</h2>
       <div id="aliases"></div>
     </div>
+    <div class="card" id="c-lifecycle">
+      <h2>Trust lifecycle <span class="tag">paper §IV.E</span></h2>
+      <p class="note">Every node follows a trust lifecycle: NEW → TRUSTED → USED → SUCCESS/FAILURE → REINFORCED/SUSPECT → QUARANTINED → REVERIFIED</p>
+      <div id="lifecycle-states"></div>
+      <div class="row">
+        <button class="sec" onclick="loadLifecycle()">Refresh lifecycle</button>
+        <button class="danger" onclick="quarantineAll()">Auto-quarantine (threshold 0.3)</button>
+      </div>
+      <div id="lifecycle-result"></div>
+    </div>
+    <div class="card" id="c-api">
+      <h2>REST API</h2>
+      <p class="note">All endpoints accept/return JSON. Use these to integrate ContextOn with external tools.</p>
+      <pre class="out" style="max-height:180px">GET  /api/stats        — graph statistics
+GET  /api/lifecycle     — trust lifecycle summary
+GET  /api/state/{id}    — node state
+GET  /api/tools         — tool registry
+GET  /api/aliases       — entity aliases
+GET  /api/graph         — vis.js graph data
+GET  /api/hygiene       — stale/low-confidence report
+
+POST /api/ingest        — ingest a Q&A pair
+POST /api/query         — query with confidence ranking
+POST /api/failure       — record a wrong answer
+POST /api/success       — record a correct answer
+POST /api/quarantine    — auto-quarantine low-confidence
+POST /api/reinstate     — reinstate quarantined node
+POST /api/from-ua       — ingest Understand-Anything graph
+POST /api/procedure     — add a skill/procedure
+POST /api/tools/register — register a tool
+POST /api/tools/outcome  — record tool success/failure
+POST /api/demo          — load demo scenario
+POST /api/reset         — clear all data</pre>
+    </div>
+    <div class="card" id="c-code">
+      <h2>Code knowledge <span class="tag">Understand-Anything</span></h2>
+      <p class="note">Import code analysis from <a href="https://github.com/nicholasgriffintn/Understand-Anything" style="color:var(--accent)">Understand-Anything</a> (79K★) and add failure learning to code summaries.</p>
+      <label>Paste .ua/knowledge-graph.json (or JSON subset)</label>
+      <textarea id="ua-json" placeholder='{"nodes":[{"id":"file:src/auth.py","type":"file","summary":"Auth module","metadata":{"language":"python","path":"src/auth.py"}}],"edges":[]}'></textarea>
+      <div class="row">
+        <button onclick="importUA()">Import graph</button>
+        <button class="sec" onclick="queryCode()">Query code knowledge</button>
+      </div>
+      <label>Query</label><input id="code-q" placeholder="authentication">
+      <div id="code-results"></div>
+    </div>
     <div class="card" id="c-out">
       <h2>Live output</h2>
       <pre class="out" id="out">Ready. Click "Load demo" or "Guided tour" to get started.</pre>
@@ -480,7 +525,7 @@ async function api(path, body){
   refreshAll();
   return data;
 }
-function refreshAll(){ loadStats(); loadGraph(); loadAliases(); loadTools(); loadProcedures(); }
+function refreshAll(){ loadStats(); loadGraph(); loadAliases(); loadTools(); loadProcedures(); loadLifecycle(); }
 
 async function runQuery(){
   const data = await api('query',{query:V('qq'),agent_id:V('inagent')});
@@ -557,6 +602,51 @@ async function hygiene(){
   return h;
 }
 
+/* Trust lifecycle */
+async function loadLifecycle(){
+  const r = await fetch('/api/lifecycle'); const l = await r.json();
+  const el = document.getElementById('lifecycle-states');
+  const counts = l.state_counts||{};
+  const colors = {new:'#8fa3c0',trusted:'#22c55e',used:'#4f8cff',success:'#22c55e',
+    failure:'#ef4444',reinforced:'#22c55e',suspect:'#eab308',quarantined:'#ef4444',reverified:'#4f8cff'};
+  el.innerHTML = Object.entries(counts).map(([s,c])=>
+    '<div class="result"><span class="badge" style="color:'+(colors[s]||'#8fa3c0')+'">'+esc(s)+'</span> <b>'+c+'</b> nodes</div>').join('')||
+    '<div class="result">No nodes yet.</div>';
+  document.getElementById('lifecycle-result').innerHTML =
+    '<div class="result">Quarantined: <b>'+(l.quarantined_count||0)+'</b> · Total: <b>'+(l.total_nodes||0)+'</b></div>';
+}
+async function quarantineAll(){
+  const r = await fetch('/api/quarantine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:0.3})});
+  const d = await r.json();
+  document.getElementById('lifecycle-result').innerHTML =
+    '<div class="result">'+badge('🔒')+' Quarantined <b>'+d.quarantined+'</b> nodes below 0.3 confidence</div>';
+  loadLifecycle();
+}
+
+/* Code knowledge (Understand-Anything bridge) */
+async function importUA(){
+  try {
+    const raw = V('ua-json');
+    const graph = JSON.parse(raw);
+    const data = await api('from-ua', {graph});
+    document.getElementById('code-results').innerHTML =
+      '<div class="result">'+badge('✅')+' Imported <b>'+data.nodes_ingested+'</b> nodes, <b>'+data.edges_ingested+'</b> edges from Understand-Anything</div>';
+  } catch(e) {
+    document.getElementById('code-results').innerHTML =
+      '<div class="result">'+badge('❌')+' JSON parse error: '+esc(e.message)+'</div>';
+  }
+}
+async function queryCode(){
+  const q = V('code-q');
+  if(!q) return;
+  const data = await api('query', {query:q});
+  const el = document.getElementById('code-results');
+  if(!data.results||!data.results.length){ el.innerHTML='<div class="result">No code knowledge found.</div>'; return; }
+  el.innerHTML = data.results.map(r=>
+    '<div class="result">'+badge(r.badge)+' <b>'+r.confidence+'</b> · <span class="tag">'+r.state+'</span> '+
+    esc(r.content)+'</div>').join('');
+}
+
 const SCENARIO_FILLS = {
   all:    { inq:'What triggers a fraud alert?', ina:'Unusual transactions above the daily limit or from unrecognized devices trigger a fraud alert', inagent:'fraud-agent', insession:'f1', qq:'fraud alert', pn:'Verify suspicious transaction', ps:'Freeze the transaction; Check the customer profile against KYC records; Review the AML risk score; Escalate to the fraud team if the score is high', tn:'risk_scorer', td:'Scores transaction risk for fraud detection' },
   fraud:  { inq:'What triggers a fraud alert?', ina:'Unusual transactions above the daily limit or from unrecognized devices trigger a fraud alert', inagent:'fraud-agent', insession:'f1', qq:'fraud alert', pn:'Verify suspicious transaction', ps:'Freeze the transaction; Check the customer profile against KYC records; Review the AML risk score; Escalate to the fraud team if the score is high', tn:'risk_scorer', td:'Scores transaction risk for fraud detection' },
@@ -580,21 +670,21 @@ function reset(){
 
 /* ---------------- Guided walkthrough ---------------- */
 const TOUR = [
-  {card:'c-ingest', title:'Welcome 👋', text:'This is ContextOn.AI OSS: a knowledge graph for AI agents that scores confidence, learns from failures, stores skills and tools, and injects context. Click Next to take the 60-second tour — every step runs for real on live data.'},
-  {card:'c-ingest', title:'1. Load the demo dataset', text:'We will load a realistic multi-agent dataset across three use cases: customer support (refunds, shipping), banking & fraud alerts (KYC, AML, transaction checks), and IT/DevOps incident ops (SRE, P1 incidents). Click "Load demo".', run:()=>loadDemo()},
-  {card:'c-stats', title:'2. Stats & health', text:'The graph now has nodes (facts, entities, conversations, procedures, tools) and edges. The stats panel shows counts, average confidence, and communities. Watch the average confidence move as we go.'},
-  {card:'c-query', title:'3. Query with confidence', text:'Ask the graph "fraud alert". Results are ranked by relevance AND confidence, with 🟢🟡🔴 badges. Notice "KYC" and "Know Your Customer" are one entity — aliases were resolved automatically.', run:()=>runQuery()},
-  {card:'c-query', title:'4. Auto-context injection', text:'Now click "Get context". This is the context layer agents consume: a confident, badge-annotated pack for the current session, packed to a token budget. No embeddings needed — fully deterministic.', run:()=>runContext()},
-  {card:'c-flearn', title:'5. Failure learning (the key feature)', text:'This is what no other tool does. Pretend the agent gave a WRONG answer about fraud alerts. Record it. Then query again — confidence drops to 🔴 and the graph remembers not to trust that path.', run:()=>{setV('fq','What triggers a fraud alert?');setV('fa','Fraud alerts trigger only for missing card payments');return recordFailure();}},
-  {card:'c-query', title:'6. See the damage', text:'Run the query again — the same knowledge now returns 🔴 with much lower confidence. The graph learned from the failure.', run:()=>runQuery()},
-  {card:'c-flearn', title:'7. Record the correct answer', text:'Now the agent gives the RIGHT answer. Record it as a success — this verifies the knowledge and restores confidence.', run:()=>{setV('fa','Unusual transactions above the daily limit or from unrecognized devices trigger a fraud alert');return recordSuccess();}},
-  {card:'c-query', title:'8. Confidence restored', text:'Query once more: 🟢 high confidence again. Failures are remembered, successes restore trust. That feedback loop is the core differentiator.', run:()=>runQuery()},
-  {card:'c-proc', title:'9. Skills (procedures)', text:'Agents stored "how to" skills across domains — refund processing, fraud verification, and incident runbooks — each with ordered steps and a confidence badge. Agents retrieve skills like any knowledge.', run:()=>loadProcedures()},
-  {card:'c-tools', title:'10. Tool registry memory', text:'Tools are registered with descriptions. Note risk_scorer and monitoring_dashboard have failures recorded — their confidence is lower. The graph tracks which tools work and which ones fail.', run:()=>loadTools()},
-  {card:'c-aliases', title:'11. Entity aliases', text:'"KYC" and "Know Your Customer", "AML" and "Anti-Money Laundering", "SRE" and "Site Reliability Engineering" each resolved to one canonical entity. Cleaner graphs, better retrieval.'},
-  {card:'c-stats', title:'12. Memory hygiene', text:'Run the hygiene sweep — it flags stale or low-confidence knowledge that needs re-verification. Run it nightly to keep the graph trustworthy.', run:()=>hygiene()},
-  {card:'c-graph', title:'13. Live graph', text:'The graph view colors nodes by confidence: 🟢 high, 🟡 medium, 🔴 low. You just watched some of these flip from 🟢 → 🔴 → 🟢 during the failure demo.', run:()=>loadGraph()},
-  {card:'c-out', title:'Done 🎉', text:'That is the whole open-source tool. Now open "Market vs us" to see how it differs from Graphify, Graphiti, Mem0, and GraphRAG — and what the enterprise tier adds (isolation, quality auditing, drift detection, compliance).', run:()=>openMarket()},
+  {card:'c-ingest', title:'Welcome', text:'This is ContextOn.AI OSS: a knowledge graph for AI agents that scores confidence, learns from failures, tracks trust lifecycle, stores skills and tools, and injects context. Click Next to take the 60-second tour.'},
+  {card:'c-ingest', title:'1. Load the demo dataset', text:'We will load a realistic multi-agent dataset across three use cases: customer support (refunds, shipping), banking & fraud alerts (KYC, AML), and IT/DevOps incident ops (SRE, P1 incidents). Click "Load demo".', run:()=>loadDemo()},
+  {card:'c-stats', title:'2. Stats & health', text:'The graph now has nodes (facts, entities, conversations, procedures, tools) and edges. The stats panel shows counts, average confidence, and communities.'},
+  {card:'c-query', title:'3. Query with confidence', text:'Ask the graph "fraud alert". Results are ranked by relevance AND confidence, with 🟢🟡🔴 badges. Each result now shows its trust lifecycle state.', run:()=>runQuery()},
+  {card:'c-flearn', title:'4. Failure learning (the key feature)', text:'This is what no other tool does. Pretend the agent gave a WRONG answer. Record it — confidence halves, node moves to FAILURE state. Record the correct answer — confidence restores, node moves to REINFORCED.', run:()=>{setV('fq','What triggers a fraud alert?');setV('fa','Fraud alerts trigger only for missing card payments');return recordFailure();}},
+  {card:'c-query', title:'5. See the damage', text:'Run the query again — the same knowledge now returns 🔴 with much lower confidence and FAILURE state. The graph learned from the failure.', run:()=>runQuery()},
+  {card:'c-flearn', title:'6. Record success', text:'Now the agent gives the RIGHT answer. Record it — this verifies the knowledge, restores confidence, and moves the node to REINFORCED.', run:()=>{setV('fa','Unusual transactions above the daily limit or from unrecognized devices trigger a fraud alert');return recordSuccess();}},
+  {card:'c-query', title:'7. Confidence restored', text:'Query once more: 🟢 high confidence again. Failures remembered, successes restore trust. That feedback loop is the core differentiator.', run:()=>runQuery()},
+  {card:'c-lifecycle', title:'8. Trust lifecycle', text:'Every node follows a lifecycle: NEW → TRUSTED → USED → SUCCESS/FAILURE → REINFORCED/SUSPECT → QUARANTINED → REVERIFIED. Nodes below 0.3 confidence are auto-quarantined and excluded from retrieval.', run:()=>loadLifecycle()},
+  {card:'c-proc', title:'9. Skills (procedures)', text:'Agents stored "how to" skills — refund processing, fraud verification, incident runbooks — each with ordered steps and a confidence badge.', run:()=>loadProcedures()},
+  {card:'c-tools', title:'10. Tool registry memory', text:'Tools are registered with descriptions. risk_scorer and monitoring_dashboard have failures — their confidence is lower. The graph tracks which tools work.', run:()=>loadTools()},
+  {card:'c-code', title:'11. Code knowledge', text:'Import code analysis from Understand-Anything (79K★ GitHub stars). Paste a knowledge-graph.json and the bridge adds confidence scoring and failure learning to code summaries.', run:()=>{}},
+  {card:'c-api', title:'12. REST API', text:'All functionality is exposed via JSON API endpoints. Use these to integrate ContextOn with external tools, agent frameworks, or your enterprise application.'},
+  {card:'c-graph', title:'13. Live graph', text:'The graph view colors nodes by confidence: 🟢 high, 🟡 medium, 🔴 low. Watch them flip during the failure demo.', run:()=>loadGraph()},
+  {card:'c-out', title:'Done', text:'That is the whole open-source tool. Open "Market vs us" to see how it differs from Mem0, Graphiti, Cognee, Letta, and Acontext.', run:()=>openMarket()},
 ];
 
 let tourIdx = 0;
@@ -636,17 +726,17 @@ function closeFlow(){ document.getElementById('flowchart').style.display='none';
 /* How-it-works confidence calculator (server-backed, debounced) */
 let calcTimer=null;
 async function updateCalc(){
-  const stored=+V('cw-stored')/100, mentions=+V('cw-mentions'), days=+V('cw-days'), failures=+V('cw-failures');
-  setV('cv-stored',stored.toFixed(1)); setV('cv-mentions',mentions); setV('cv-days',days); setV('cv-failures',failures);
+  const stored=+V('cw-stored')/100, days=+V('cw-days'), failures=+V('cw-failures');
+  setV('cv-stored',stored.toFixed(1)); setV('cv-days',days); setV('cv-failures',failures);
   clearTimeout(calcTimer);
   calcTimer=setTimeout(async()=>{
     const r=await fetch('/api/breakdown',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({stored,mentions,days,failures})});
+      body:JSON.stringify({stored,days,failures})});
     const b=await r.json();
     document.getElementById('cw-result').innerHTML =
       '<div class="result">'+badge(b.badge)+' Final confidence: <b>'+b.final_confidence+'</b>'+
-      '<div class="meta">base '+b.base_score+' × decay '+b.decay_factor+' × failure penalty '+b.failure_penalty+
-      '  (mentions '+b.mentions+', '+b.days_since_verified+'d old, '+b.failure_count+' failures)</div></div>';
+      '<div class="meta">stored '+b.stored_confidence+' × decay '+b.decay_factor+' × failure penalty '+b.failure_penalty+
+      '  ('+b.days_since_verified+'d old, '+b.failure_count+' failures)</div></div>';
   },120);
 }
 
@@ -726,6 +816,21 @@ class WebDemoHandler(BaseHTTPRequestHandler):
                 self._send(200, {"nodes": nodes, "edges": edges})
             elif path == "/api/hygiene":
                 self._send(200, self.graph.hygiene_sweep())
+            elif path == "/api/lifecycle":
+                self._send(200, self.graph.get_lifecycle_summary())
+            elif path.startswith("/api/state/"):
+                node_id = path.split("/api/state/", 1)[1]
+                node = self.graph.get_node(node_id)
+                if node:
+                    self._send(200, {
+                        "node_id": node_id,
+                        "state": node.get("state", "trusted"),
+                        "confidence": round(
+                            self.graph.confidence_engine.node_confidence(node), 3),
+                        "content": node.get("content", "")[:100],
+                    })
+                else:
+                    self._send(404, {"error": "node not found"})
             else:
                 self._send(404, {"error": "not found"})
 
@@ -762,6 +867,7 @@ class WebDemoHandler(BaseHTTPRequestHandler):
                 results = self.graph.query(
                     body.get("query", ""),
                     agent_id=body.get("agent_id", ""),
+                    include_quarantined=body.get("include_quarantined", False),
                 )
                 self._send(200, {"results": [
                     {
@@ -769,6 +875,7 @@ class WebDemoHandler(BaseHTTPRequestHandler):
                         "node_type": r["node"].get("type"),
                         "confidence": round(r["confidence"], 3),
                         "badge": r["badge"],
+                        "state": r.get("state", "trusted"),
                     } for r in results
                 ]})
             elif path == "/api/context":
@@ -819,6 +926,33 @@ class WebDemoHandler(BaseHTTPRequestHandler):
                 # attribute - each request gets a fresh handler instance.
                 type(self).graph = _fresh_graph(self.graph.data_dir)
                 self._send(200, {"status": "reset"})
+            elif path == "/api/quarantine":
+                threshold = float(body.get("threshold", 0.3))
+                self._send(200, self.graph.quarantine_low_confidence(threshold))
+            elif path == "/api/reinstate":
+                self._send(200, self.graph.unreinstate_quarantined(
+                    body.get("node_id", "")))
+            elif path == "/api/from-ua":
+                import tempfile, json as _json
+                from .ua_bridge import ingest_from_ua
+                ua_graph = body.get("graph", {})
+                if not ua_graph:
+                    self._send(400, {"error": "missing 'graph' field"})
+                    return
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".json", delete=False
+                ) as f:
+                    _json.dump(ua_graph, f)
+                    tmp_path = f.name
+                try:
+                    result = ingest_from_ua(
+                        self.graph, tmp_path,
+                        agent_id=body.get("agent_id", "understand-anything"),
+                    )
+                    self._send(200, result)
+                finally:
+                    import os
+                    os.unlink(tmp_path)
             else:
                 self._send(404, {"error": "not found"})
 

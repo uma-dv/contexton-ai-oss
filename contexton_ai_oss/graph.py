@@ -14,6 +14,11 @@ from .failure_learning import FailureLearningEngine
 from .quality import QualityBadges
 from .text_utils import normalize, tokenize, utc_iso_now
 from .entities import extract_entities, is_alias, resolve_alias
+from .lifecycle import (
+    STATE_NEW, STATE_TRUSTED, STATE_USED, STATE_SUCCESS, STATE_FAILURE,
+    STATE_REINFORCED, STATE_SUSPECT, STATE_QUARANTINED, STATE_REVERIFIED,
+    VALID_TRANSITIONS, can_transition, get_lifecycle_summary,
+)
 from .advanced import (
     confidence_weighted_bfs,
     find_high_confidence_paths,
@@ -225,6 +230,7 @@ class ContextGraph:
                 "failure_count": 0,
                 "success_count": 0,
                 "query_count": 0,
+                "state": STATE_TRUSTED,  # Trust lifecycle state
             }
             if metadata:
                 self.nodes[nid]["metadata"] = metadata
@@ -284,6 +290,140 @@ class ContextGraph:
     def get_node(self, node_id: str) -> Optional[Dict]:
         """Get a node by ID."""
         return self.nodes.get(node_id)
+    
+    def transition_state(self, node_id: str, new_state: str) -> Dict[str, Any]:
+        """
+        Transition a node to a new trust lifecycle state.
+        
+        Enforces valid transitions per paper Section IV.E:
+            NEW → TRUSTED → USED → SUCCESS/FAILURE → REINFORCED/SUSPECT → QUARANTINED → REVERIFIED
+        
+        Args:
+            node_id: Node to transition
+            new_state: Target state
+        
+        Returns:
+            Dict with transition result
+        """
+        node = self.nodes.get(node_id)
+        if not node:
+            return {"status": "error", "message": f"Node {node_id} not found"}
+        
+        current = node.get("state", STATE_TRUSTED)
+        valid = VALID_TRANSITIONS.get(current, set())
+        
+        if new_state not in valid:
+            return {
+                "status": "error",
+                "message": f"Invalid transition: {current} → {new_state}. Valid: {valid}",
+            }
+        
+        node["state"] = new_state
+        node["last_seen"] = utc_iso_now()
+        self._dirty = True
+        self._save()
+        
+        return {
+            "status": "transitioned",
+            "node_id": node_id,
+            "from": current,
+            "to": new_state,
+        }
+    
+    def get_lifecycle_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of all nodes by trust lifecycle state.
+        
+        Returns:
+            Dict with state counts and lists
+        """
+        by_state: Dict[str, List[Dict]] = {}
+        for nid, node in self.nodes.items():
+            state = node.get("state", STATE_TRUSTED)
+            by_state.setdefault(state, []).append({
+                "id": nid,
+                "content": node.get("content", "")[:100],
+                "confidence": round(self.confidence_engine.node_confidence(node), 3),
+            })
+        
+        return {
+            "state_counts": {s: len(nodes) for s, nodes in by_state.items()},
+            "by_state": by_state,
+            "quarantined_count": len(by_state.get(STATE_QUARANTINED, [])),
+            "total_nodes": len(self.nodes),
+        }
+    
+    def quarantine_low_confidence(self, threshold: float = 0.3) -> Dict[str, Any]:
+        """
+        Auto-quarantine nodes below confidence threshold.
+        
+        Paper Section IV.E: "Memories below a configurable confidence
+        threshold are excluded from retrieval, implementing automatic
+        quarantine of unreliable knowledge."
+        
+        Args:
+            threshold: Confidence threshold (default 0.3)
+        
+        Returns:
+            Dict with quarantine results
+        """
+        quarantined = []
+        for nid, node in self.nodes.items():
+            # Skip observation/bookkeeping nodes
+            if node.get("type") == NODE_OBSERVATION:
+                continue
+            # Skip already quarantined nodes
+            if node.get("state") == STATE_QUARANTINED:
+                continue
+            
+            confidence = self.confidence_engine.node_confidence(node)
+            if confidence < threshold:
+                node["state"] = STATE_QUARANTINED
+                node["last_seen"] = utc_iso_now()
+                quarantined.append({
+                    "id": nid,
+                    "content": node.get("content", "")[:100],
+                    "confidence": round(confidence, 3),
+                })
+        
+        if quarantined:
+            self._dirty = True
+            self._save()
+        
+        return {
+            "quarantined": len(quarantined),
+            "threshold": threshold,
+            "nodes": quarantined,
+        }
+    
+    def unreinstate_quarantined(self, node_id: str) -> Dict[str, Any]:
+        """
+        Manually reinstate a quarantined node after re-verification.
+        
+        Args:
+            node_id: Quarantined node to reinstate
+        
+        Returns:
+            Dict with reinstatement result
+        """
+        node = self.nodes.get(node_id)
+        if not node:
+            return {"status": "error", "message": f"Node {node_id} not found"}
+        
+        if node.get("state") != STATE_QUARANTINED:
+            return {"status": "error", "message": f"Node is not quarantined (state: {node.get('state')})"}
+        
+        node["state"] = STATE_REVERIFIED
+        node["last_verified"] = utc_iso_now()
+        node["last_seen"] = utc_iso_now()
+        self._dirty = True
+        self._save()
+        
+        return {
+            "status": "reinstated",
+            "node_id": node_id,
+            "state": STATE_REVERIFIED,
+        }
     
     def get_edge(self, source_id: str, target_id: str, edge_type: str) -> Optional[Dict]:
         """Get an edge by source, target, and type."""
@@ -634,6 +774,7 @@ class ContextGraph:
         max_results: int = 5,
         node_type: str = "",
         agent_id: str = "",
+        include_quarantined: bool = False,
     ) -> List[Dict]:
         """
         Query the graph with confidence-ranked retrieval.
@@ -642,7 +783,8 @@ class ContextGraph:
         1. Finds relevant nodes (punctuation-insensitive token matching)
         2. Ranks by confidence (not just relevance)
         3. Never returns failure/observation bookkeeping nodes
-        4. Returns quality badges
+        4. Excludes quarantined nodes (paper Section IV.E)
+        5. Returns quality badges
         
         Args:
             query: Search query
@@ -650,6 +792,7 @@ class ContextGraph:
             max_results: Maximum results to return
             node_type: Optional filter (e.g. "procedure", "tool", "entity")
             agent_id: Optional per-agent scope filter (transparency, not enforcement)
+            include_quarantined: If True, include quarantined nodes in results
         
         Returns:
             List of matching nodes with confidence scores
@@ -662,6 +805,10 @@ class ContextGraph:
             # Skip failure observations - they are bookkeeping, not knowledge
             if node.get("type") == NODE_OBSERVATION and \
                     node.get("metadata", {}).get("type") == "failure":
+                continue
+            
+            # Skip quarantined nodes unless explicitly requested (paper Section IV.E)
+            if not include_quarantined and node.get("state") == STATE_QUARANTINED:
                 continue
             
             # Node type filter
@@ -689,6 +836,7 @@ class ContextGraph:
                     "score": score,
                     "confidence": confidence,
                     "badge": self.quality_badges.get_badge(confidence),
+                    "state": node.get("state", STATE_TRUSTED),
                 })
                 node["query_count"] = node.get("query_count", 0) + 1
         

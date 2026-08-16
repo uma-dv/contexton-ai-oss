@@ -8,7 +8,7 @@ Open-source version by ODEFTO AI Labs.
 Enterprise version: https://contexton.ai
 """
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"
 
 from .graph import ContextGraph
 from .confidence import ConfidenceEngine
@@ -23,6 +23,7 @@ from .advanced import (
     multi_hop_reasoning,
     ingest_from_enterprise_graph,
 )
+from .ua_bridge import ingest_from_ua, query_code
 
 __all__ = [
     "ContextGraph",
@@ -38,4 +39,6 @@ __all__ = [
     "extract_entities_with_types",
     "multi_hop_reasoning",
     "ingest_from_enterprise_graph",
+    "ingest_from_ua",
+    "query_code",
 ]

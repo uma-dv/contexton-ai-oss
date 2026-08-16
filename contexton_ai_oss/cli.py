@@ -17,7 +17,7 @@ import sys
 
 from .graph import ContextGraph
 
-VERSION = "0.1.0"
+VERSION = "0.4.0"
 
 
 def _print_utf8(obj) -> None:
@@ -166,6 +166,32 @@ def cmd_agent_memory(args) -> None:
             print(f"    {n['badge']} {n['content'][:80]}")
 
 
+def cmd_from_ua(args) -> None:
+    from .ua_bridge import ingest_from_ua, query_code
+
+    graph = _load_graph(args.data_dir)
+    if args.action == "ingest":
+        result = ingest_from_ua(
+            graph,
+            args.path_or_query,
+            agent_id=args.agent,
+        )
+        _print_utf8(result)
+    elif args.action == "query":
+        results = query_code(
+            graph,
+            args.path_or_query,
+            min_confidence=args.min_confidence,
+            max_results=args.max_results,
+        )
+        if not results:
+            print("No code knowledge found.")
+            return
+        for r in results:
+            loc = f" ({r['path']}:{r['lines']})" if r["path"] else ""
+            print(f"{r['badge']} {r['confidence']:.0%} | {r['content'][:120]}{loc}")
+
+
 def cmd_web(args) -> None:
     from .web_demo import run_web
 
@@ -275,6 +301,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("agent", type=str)
     p.add_argument("--data-dir", type=str, default=None)
     p.set_defaults(func=cmd_agent_memory)
+
+    # from-ua
+    p = sub.add_parser("from-ua", help="Ingest or query Understand-Anything knowledge graphs")
+    p.add_argument("action", type=str, choices=["ingest", "query"], help="ingest a .ua/knowledge-graph.json or query imported code knowledge")
+    p.add_argument("path_or_query", type=str, help="Path to .ua/knowledge-graph.json (ingest) or search query (query)")
+    p.add_argument("--agent", type=str, default="understand-anything")
+    p.add_argument("--min-confidence", type=float, default=0.3)
+    p.add_argument("--max-results", type=int, default=5)
+    p.add_argument("--data-dir", type=str, default=None)
+    p.set_defaults(func=cmd_from_ua)
 
     # web demo
     p = sub.add_parser("web", help="Run the browser web demo")
